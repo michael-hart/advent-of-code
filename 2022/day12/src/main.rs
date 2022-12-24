@@ -1,4 +1,6 @@
-#[derive(Clone, Debug, PartialEq)]
+use petgraph::visit::EdgeRef;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct Coords {
     x: i32,
     y: i32,
@@ -60,93 +62,64 @@ enum Dir {
     Right,
 }
 
-impl Dir {
-    fn next(dir: Option<Dir>) -> Option<Dir> {
-        match dir {
-            None => Some(Dir::Up),
-            Some(Dir::Up) => Some(Dir::Right),
-            Some(Dir::Right) => Some(Dir::Down),
-            Some(Dir::Down) => Some(Dir::Left),
-            Some(Dir::Left) => None,
-        }
-    }
-}
-
 impl Grid {
+    fn width(&self) -> usize {
+        self.grid[0].len()
+    }
+    fn height(&self) -> usize {
+        self.grid.len()
+    }
+
     fn contains(&self, coords: &Coords) -> bool {
         (coords.x >= 0) &&
-        (coords.x < self.grid[0].len() as i32) &&
+        (coords.x < self.width() as i32) &&
         (coords.y >= 0) &&
-        (coords.y < self.grid.len() as i32)
+        (coords.y < self.height() as i32)
     }
 
     fn get(&self, coords: &Coords) -> u32 {
         self.grid[coords.y as usize][coords.x as usize]
     }
 
-    fn fewest_steps(&self) -> usize {
-        let mut smallest_steps = usize::max_value();
-        let mut steps: Vec<(Coords, Dir)> = vec![(self.start.clone(), Dir::Up)];
-
-        let push_next_dir = |test_tuple: (Coords, Dir), steps: &mut Vec<(Coords, Dir)>| {
-            if let Some(next_dir) = Dir::next(Some(test_tuple.1)) {
-                steps.push((test_tuple.0, next_dir));
-            } else {
-                while let Some(prev_tuple) = steps.pop() {
-                    if let Some(next_dir) = Dir::next(Some(prev_tuple.1)) {
-                        steps.push((prev_tuple.0, next_dir));
-                        break;
+    fn as_graph(&self) -> petgraph::graphmap::GraphMap<Coords, u32, petgraph::Directed> {
+        let mut graph = petgraph::graphmap::GraphMap::new();
+        for row_idx in 0..self.height() {
+            for col_idx in 0..self.width() {
+                let coords = Coords::new(col_idx as i32, row_idx as i32);
+                let current_val = self.get(&coords);
+                graph.add_node(coords);
+                for dir in [Dir::Up, Dir::Right, Dir::Down, Dir::Left] {
+                    let check_coords = coords.step(&dir);
+                    if self.contains(&check_coords) && self.get(&check_coords) <= (current_val + 1) {
+                        graph.add_edge(coords, check_coords, 1);
                     }
                 }
             }
-        };
-
-        while let Some(test_tuple) = steps.pop() {
-            // println!("Just popped: {:?}", &test_tuple);
-            if test_tuple.0 == self.end {
-                // Reached the end! Backtrack to exhaust all routes.
-                smallest_steps = smallest_steps.min(steps.len());
-                let prev_tuple = steps.pop().unwrap();
-                push_next_dir(prev_tuple, &mut steps);
-                continue;
-            }
-
-            let next_coords = test_tuple.0.step(&test_tuple.1);
-
-            // Are the coords possible?
-            if !self.contains(&next_coords) {
-                push_next_dir(test_tuple, &mut steps);
-                continue;
-            }
-
-            // Is it possible to step this way?
-            let current_val = self.get(&test_tuple.0);
-            let next_val = self.get(&next_coords);
-            if current_val.abs_diff(next_val) > 1 {
-                push_next_dir(test_tuple, &mut steps);
-                continue;
-            }
-
-            // Has this step already been taken?
-            let seen = steps.iter().filter(|(x, _)| *x == next_coords).count() > 0;
-            if seen {
-                push_next_dir(test_tuple, &mut steps);
-                continue;
-            }
-
-            // Coords are in range; step is possible; we've not been to this square. Push the next coords with Up!
-            steps.push(test_tuple);
-            steps.push((next_coords, Dir::Up));
         }
+        graph
+    }
 
-        smallest_steps
+    fn fewest_steps(&self) -> Option<u32> {
+        let graph = self.as_graph();
+        let manhattan = |test: Coords| test.x.abs_diff(self.start.x) + test.y.abs_diff(self.start.y);
+        petgraph::algo::astar(&graph, self.start, |x| x == self.end, |e| *e.weight(), manhattan).map(|(steps, _)| steps)
+    }
 
+    fn best_trail_length(&self) -> Option<u32> {
+        let graph = self.as_graph();
+        let result_map = petgraph::algo::dijkstra(&graph, self.end, None, |_| 1);
+        result_map.iter()
+            .filter_map(|(coords, x)| if self.get(coords) == 'a' as u32 { 
+                Some(*x)
+            } else { None })
+            .min()
     }
     
 }
 
 fn main() {
-    let raw = include_str!("../input.txt");
+    let raw = include_str!("../test.txt");
     let grid = Grid::from(raw);
-    println!("{}", grid.fewest_steps());
+    println!("A: {:?}", grid.fewest_steps());
+    println!("B: {:?}", grid.best_trail_length());
 }
