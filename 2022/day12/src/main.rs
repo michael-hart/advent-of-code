@@ -54,6 +54,7 @@ impl From<&str> for Grid {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 enum Dir {
     Up,
@@ -82,16 +83,53 @@ impl Grid {
     }
 
     fn as_graph(&self) -> petgraph::graphmap::GraphMap<Coords, u32, petgraph::Directed> {
-        let mut graph = petgraph::graphmap::GraphMap::new();
+        let mut graph = petgraph::graphmap::GraphMap::default();
         for row_idx in 0..self.height() {
             for col_idx in 0..self.width() {
                 let coords = Coords::new(col_idx as i32, row_idx as i32);
                 let current_val = self.get(&coords);
-                graph.add_node(coords);
-                for dir in [Dir::Up, Dir::Right, Dir::Down, Dir::Left] {
+                for dir in [Dir::Right, Dir::Down] {
                     let check_coords = coords.step(&dir);
-                    if self.contains(&check_coords) && self.get(&check_coords) <= (current_val + 1) {
-                        graph.add_edge(coords, check_coords, 1);
+                    if self.contains(&check_coords) {
+                        let check_val = self.get(&check_coords);
+                        // If stepping level or up/down one, add both direction
+                        if check_val.abs_diff(current_val) <= 1 {
+                            graph.add_edge(coords, check_coords, 1);
+                            graph.add_edge(check_coords, coords, 1);
+                        // If stepping down a lot, that's allowed, but only in this direction
+                        } else if current_val > check_val {
+                            graph.add_edge(coords, check_coords, 1);
+                        } else {
+                            graph.add_edge(check_coords, coords, 1);
+                        }
+                    }
+                }
+            }
+        }
+        graph
+    }
+
+    fn as_rev_graph(&self) -> petgraph::graphmap::GraphMap<Coords, u32, petgraph::Directed> {
+        // This graph is to allow reverse searching from 'z' to all 'a' tiles. As such, we're
+        // not allowed to just step down as much as we want - we're travelling backwards, so we
+        // flip the rules so we can only step down one, but step up as many as we want.
+        let mut graph = petgraph::graphmap::GraphMap::default();
+        for row_idx in 0..self.height() {
+            for col_idx in 0..self.width() {
+                let coords = Coords::new(col_idx as i32, row_idx as i32);
+                let current_val = self.get(&coords);
+                for dir in [Dir::Right, Dir::Down] {
+                    let check_coords = coords.step(&dir);
+                    if self.contains(&check_coords) {
+                        let check_val = self.get(&check_coords);
+                        if check_val.abs_diff(current_val) <= 1 {
+                            graph.add_edge(coords, check_coords, 1);
+                            graph.add_edge(check_coords, coords, 1);
+                        } else if current_val > check_val {
+                            graph.add_edge(check_coords, coords, 1);
+                        } else {
+                            graph.add_edge(coords, check_coords, 1);
+                        }
                     }
                 }
             }
@@ -106,19 +144,19 @@ impl Grid {
     }
 
     fn best_trail_length(&self) -> Option<u32> {
-        let graph = self.as_graph();
-        let result_map = petgraph::algo::dijkstra(&graph, self.end, None, |_| 1);
-        result_map.iter()
-            .filter_map(|(coords, x)| if self.get(coords) == 'a' as u32 { 
-                Some(*x)
-            } else { None })
+        let graph = self.as_rev_graph();
+
+        // Do Dijkstra to all tiles, then pick the fewest steps that lead to 'a'
+        let trails = petgraph::algo::dijkstra(&graph, self.end, None, |_| 1);
+        trails.iter()
+            .filter_map(|(coords, steps)| if self.get(coords) == 'a' as u32 { Some(*steps) } else { None })
             .min()
     }
     
 }
 
 fn main() {
-    let raw = include_str!("../test.txt");
+    let raw = include_str!("../input.txt");
     let grid = Grid::from(raw);
     println!("A: {:?}", grid.fewest_steps());
     println!("B: {:?}", grid.best_trail_length());
